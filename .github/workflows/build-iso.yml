@@ -4,6 +4,9 @@ name: Build AML OS AMD64 ISO
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -12,6 +15,23 @@ jobs:
     steps:
       - name: Download AML OS source
         uses: actions/checkout@v4
+
+      - name: Extract AML configuration
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          mkdir -p /tmp/aml-config
+          unzip -q config.zip -d /tmp/aml-config
+
+          if [ -d /tmp/aml-config/config ]; then
+            cp -a /tmp/aml-config/config ./config
+          else
+            mkdir -p config
+            cp -a /tmp/aml-config/. config/
+          fi
+
+          test -d config/includes.chroot
+          test -d config/package-lists
 
       - name: Build bootable ISO
         run: |
