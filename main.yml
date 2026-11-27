@@ -1,0 +1,105 @@
+name: Build AML OS AMD64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build bootable AML OS ISO
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Download AML OS source
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            live-build \
+            debootstrap \
+            squashfs-tools \
+            xorriso \
+            grub-pc-bin \
+            grub-efi-amd64-bin \
+            grub-common \
+            mtools \
+            dosfstools
+
+      - name: Create clean Debian Live configuration
+        run: |
+          sudo rm -rf config
+          sudo lb config \
+            --mode debian \
+            --distribution bookworm \
+            --architectures amd64 \
+            --binary-images iso-hybrid \
+            --archive-areas "main contrib non-free non-free-firmware" \
+            --mirror-bootstrap https://deb.debian.org/debian \
+            --mirror-chroot https://deb.debian.org/debian \
+            --mirror-chroot-security https://security.debian.org/debian-security \
+            --mirror-binary https://deb.debian.org/debian \
+            --mirror-binary-security https://security.debian.org/debian-security \
+            --debian-installer false \
+            --bootappend-live "boot=live components username=aml hostname=aml-os"
+
+      - name: Add AML desktop packages
+        run: |
+          sudo mkdir -p config/package-lists
+          sudo tee config/package-lists/aml.list.chroot > /dev/null <<'EOF'
+          live-boot
+          live-config
+          linux-image-amd64
+          task-xfce-desktop
+          xfce4
+          xfce4-terminal
+          lightdm
+          firefox-esr
+          thunar
+          network-manager
+          network-manager-gnome
+          gvfs
+          sudo
+          arc-theme
+          papirus-icon-theme
+          fonts-noto
+          fonts-dejavu
+          firmware-linux
+          EOF
+
+      - name: Build AML OS
+        run: |
+          sudo lb build
+
+      - name: Prepare ISO artifact
+        run: |
+          set -eu
+          mkdir -p output
+          ISO="$(find . -maxdepth 2 -type f -name '*.iso' -print -quit)"
+          if [ -z "$ISO" ]; then
+            echo "ERROR: live-build finished but no ISO file was found."
+            echo "Files in build directory:"
+            find . -maxdepth 2 -type f | head -200
+            exit 1
+          fi
+          sudo cp "$ISO" output/AML-OS-AMD64.iso
+          sudo chown -R "$(id -u):$(id -g)" output
+          ls -lh output/AML-OS-AMD64.iso
+          sha256sum output/AML-OS-AMD64.iso | tee output/SHA256SUMS.txt
+
+      - name: Upload AML OS ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: AML-OS-AMD64
+          path: |
+            output/AML-OS-AMD64.iso
+            output/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
