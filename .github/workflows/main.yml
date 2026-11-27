@@ -1,0 +1,95 @@
+
+name: Build AML OS AMD64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Download AML OS source
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            live-build \
+            xorriso \
+            debootstrap \
+            squashfs-tools \
+            debian-archive-keyring
+
+      - name: Configure AML OS
+        run: |
+          sudo lb config \
+            --mode debian \
+            --distribution bookworm \
+            --architectures amd64 \
+            --binary-images iso-hybrid \
+            --archive-areas "main contrib non-free non-free-firmware" \
+            --mirror-bootstrap https://deb.debian.org/debian/ \
+            --mirror-chroot https://deb.debian.org/debian/ \
+            --mirror-binary https://deb.debian.org/debian/ \
+            --debian-installer false \
+            --bootappend-live "boot=live components username=aml hostname=aml-os"
+
+      - name: Install AML desktop packages
+        run: |
+          sudo mkdir -p config/package-lists
+          sudo tee config/package-lists/aml.list.chroot <<'EOF'
+          live-boot
+          live-config
+          systemd-sysv
+          linux-image-amd64
+          task-xfce-desktop
+          xfce4
+          lightdm
+          lightdm-gtk-greeter
+          xserver-xorg
+          network-manager
+          network-manager-gnome
+          firefox-esr
+          thunar
+          xfce4-terminal
+          gvfs
+          sudo
+          arc-theme
+          papirus-icon-theme
+          fonts-noto
+          fonts-dejavu
+          firmware-linux
+          EOF
+
+      - name: Build AML OS ISO
+        run: |
+          sudo lb build
+
+      - name: Prepare ISO
+        run: |
+          mkdir -p output
+          ISO=$(find . -maxdepth 1 -type f -name '*.iso' | head -n 1)
+          if [ -z "$ISO" ]; then
+            echo "AML OS ISO was not generated"
+            exit 1
+          fi
+          sudo cp "$ISO" output/AML-OS-AMD64.iso
+          sudo chown -R "$(id -u):$(id -g)" output
+          ls -lh output/
+
+      - name: Upload AML OS ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: AML-OS-AMD64
+          path: output/AML-OS-AMD64.iso
+          if-no-files-found: error
+          retention-days: 7
