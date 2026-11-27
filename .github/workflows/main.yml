@@ -1,16 +1,105 @@
 
+name: Build AML OS AMD64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Download AML OS source
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            live-build \
+            debootstrap \
+            squashfs-tools \
+            xorriso \
+            grub-pc-bin \
+            grub-efi-amd64-bin \
+            mtools \
+            dosfstools
+
       - name: Configure AML OS
         run: |
           sudo lb config \
+            --mode debian \
             --distribution bookworm \
             --architectures amd64 \
             --binary-images iso-hybrid \
             --archive-areas "main contrib non-free non-free-firmware" \
+            --mirror-bootstrap https://deb.debian.org/debian \
+            --mirror-chroot https://deb.debian.org/debian \
+            --mirror-chroot-security https://security.debian.org/debian-security \
+            --mirror-binary https://deb.debian.org/debian \
+            --mirror-binary-security https://security.debian.org/debian-security \
+            --security true \
+            --updates true \
             --debian-installer false \
-            --mirror-bootstrap http://deb.debian.org/debian \
-            --mirror-chroot http://deb.debian.org/debian \
-            --mirror-binary http://deb.debian.org/debian \
-            --mirror-bootstrap-security http://deb.debian.org/debian-security \
-            --mirror-chroot-security http://deb.debian.org/debian-security \
-            --mirror-binary-security http://deb.debian.org/debian-security \
-            --bootappend-live "boot=live components username=aml hostname=aml-os"
+            --bootappend-live "boot=live components username=aml hostname=aml-os" \
+            --image-name AML-OS
+
+      - name: Install AML desktop packages
+        run: |
+          sudo mkdir -p config/package-lists
+
+          sudo tee config/package-lists/aml.list.chroot <<'EOF'
+          live-boot
+          live-config
+          linux-image-amd64
+          task-xfce-desktop
+          xfce4
+          xfce4-terminal
+          lightdm
+          firefox-esr
+          thunar
+          network-manager
+          network-manager-gnome
+          gvfs
+          sudo
+          arc-theme
+          papirus-icon-theme
+          fonts-noto
+          fonts-dejavu
+          firmware-linux
+          EOF
+
+      - name: Build AML OS ISO
+        run: |
+          sudo lb build
+
+      - name: Prepare ISO file
+        run: |
+          mkdir -p output
+
+          ISO=$(find . -maxdepth 2 -type f -name "*.iso" | head -n 1)
+
+          if [ -z "$ISO" ]; then
+            echo "ERROR: ISO was not generated"
+            exit 1
+          fi
+
+          sudo cp "$ISO" output/AML-OS-AMD64.iso
+          sudo chown -R "$(id -u):$(id -g)" output
+
+          ls -lh output/
+
+      - name: Upload AML OS ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: AML-OS-AMD64
+          path: output/AML-OS-AMD64.iso
+          if-no-files-found: error
+          retention-days: 7
