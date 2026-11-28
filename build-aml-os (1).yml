@@ -1,0 +1,141 @@
+name: Build AML OS AMD64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            live-build \
+            debootstrap \
+            xorriso \
+            squashfs-tools \
+            debian-archive-keyring
+
+      - name: Build AML OS live ISO with Debian Installer
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+
+          BUILD_DIR="$GITHUB_WORKSPACE/aml-build"
+          mkdir -p "$BUILD_DIR"
+          cd "$BUILD_DIR"
+
+          mkdir -p \
+            config/package-lists \
+            config/includes.chroot/usr/share/backgrounds/aml \
+            config/includes.chroot/etc/lightdm/lightdm.conf.d \
+            config/includes.chroot/etc/skel/Desktop
+
+          cat > config/package-lists/aml.list.chroot <<'PACKAGES'
+          live-boot
+          systemd-sysv
+          xfce4
+          xfce4-goodies
+          lightdm
+          lightdm-gtk-greeter
+          network-manager
+          network-manager-gnome
+          firefox-esr
+          thunar
+          mousepad
+          ristretto
+          xfce4-terminal
+          sudo
+          dbus-x11
+          xorg
+          mesa-utils
+          fonts-dejavu
+          fonts-noto
+          papirus-icon-theme
+          adwaita-icon-theme
+          plymouth
+          PACKAGES
+
+          cat > config/includes.chroot/usr/share/backgrounds/aml/aml-wallpaper.svg <<'SVG'
+          <svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080">
+            <defs>
+              <linearGradient id="g" x2="1" y2="1">
+                <stop stop-color="#07152f"/>
+                <stop offset=".55" stop-color="#123d68"/>
+                <stop offset="1" stop-color="#087e8b"/>
+              </linearGradient>
+            </defs>
+            <rect width="1920" height="1080" fill="url(#g)"/>
+            <circle cx="1500" cy="250" r="430" fill="#42e8d5" opacity=".12"/>
+            <path d="M0 850 Q480 650 960 850 T1920 790V1080H0Z"
+                  fill="#061326" opacity=".45"/>
+            <g fill="none" stroke="#7be9df" stroke-opacity=".16">
+              <path d="M0 200H1920M0 300H1920M0 400H1920
+                       M300 0V1080M500 0V1080M700 0V1080
+                       M900 0V1080M1100 0V1080M1300 0V1080
+                       M1500 0V1080M1700 0V1080"/>
+            </g>
+            <text x="150" y="490" fill="white" font-family="sans-serif"
+                  font-size="150" font-weight="bold">AML OS</text>
+            <text x="160" y="565" fill="#9deee7" font-family="sans-serif"
+                  font-size="38" letter-spacing="8">A NEW DESKTOP EXPERIENCE</text>
+            <text x="160" y="940" fill="#d7f5f2" font-family="sans-serif"
+                  font-size="25">AMD64 • DEBIAN LIVE • XFCE DESKTOP</text>
+          </svg>
+          SVG
+
+          cat > config/includes.chroot/etc/lightdm/lightdm.conf.d/50-aml.conf <<'LIGHTDM'
+          [Seat:*]
+          greeter-session=lightdm-gtk-greeter
+          user-session=xfce
+          LIGHTDM
+
+          cat > config/includes.chroot/etc/skel/Desktop/AML-OS-Info.txt <<'INFO'
+          Welcome to AML OS
+
+          AMD64 live desktop based on Debian Live and XFCE.
+          This is a live session. Use the installer boot-menu entry to install to a disk.
+          INFO
+
+          lb config \
+            --distribution bookworm \
+            --architectures amd64 \
+            --binary-images iso-hybrid \
+            --debian-installer true \
+            --archive-areas "main contrib non-free non-free-firmware" \
+            --mirror-bootstrap https://deb.debian.org/debian \
+            --mirror-chroot https://deb.debian.org/debian \
+            --mirror-binary https://deb.debian.org/debian \
+            --bootappend-live "boot=live components username=user hostname=aml-os"
+
+          sudo lb build
+
+          ISO="$BUILD_DIR/live-image-amd64.hybrid.iso"
+          if [[ ! -s "$ISO" ]]; then
+            echo "ERROR: live-build did not create the expected ISO: $ISO" >&2
+            find "$BUILD_DIR" -maxdepth 2 -type f -name '*.iso' -print
+            exit 1
+          fi
+
+          cp "$ISO" "$GITHUB_WORKSPACE/AML-OS-amd64.iso"
+          sha256sum "$GITHUB_WORKSPACE/AML-OS-amd64.iso" \
+            > "$GITHUB_WORKSPACE/AML-OS-amd64.iso.sha256"
+
+      - name: Upload bootable ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: AML-OS-amd64-ISO
+          path: |
+            AML-OS-amd64.iso
+            AML-OS-amd64.iso.sha256
+          if-no-files-found: error
+          retention-days: 14
